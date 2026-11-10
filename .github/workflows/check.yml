@@ -1,0 +1,54 @@
+name: Check course application
+on: [push, pull_request]
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: course
+          POSTGRES_PASSWORD: course_test_only
+          POSTGRES_DB: course_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U course -d course_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-dev.txt
+      - name: Verify hand written SQL before testing API
+        env:
+          DIRECT_DATABASE_URL: postgresql://course:course_test_only@localhost:5432/course_test?sslmode=disable
+        run: |
+          python apply_sql.py sql/001_schema.sql
+          python apply_sql.py sql/002_seed.sql
+          python apply_sql.py sql/003_practice.sql
+      - name: Run API tests against PostgreSQL
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://course:course_test_only@localhost:5432/course_test?sslmode=disable
+          ALLOW_TEST_DATABASE_RESET: 'yes'
+        run: pytest -q
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://example.invalid
